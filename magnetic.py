@@ -18,7 +18,7 @@ class Magnet:
         self.imperfect=False
         self.angular_velocity=0
         self.max_acceleration=40*2*3.14
-    def set_imperfection(self,n=40,max=0):
+    def set_imperfection(self,n=40,max=0.01): #small peturbations to dipole field
         self.imperfection_coefficients=(np.random.rand(4,n)-0.5)*max*self.strength
         self.imperfect=True
         self.n=n
@@ -62,7 +62,7 @@ class Magnet:
         new_angle=np.arctan2(r[0],r[1])
         self.angle=new_angle
 
-class Trajectory:
+class Trajectory: #trajectory class, not used
     def __init__(self,time,analytic=True, func= None,sampling=100):
         self.time=time
         self.analytic=analytic
@@ -85,12 +85,12 @@ class Array: #class for full magnet array
             self.magnets.append(Magnet(xy=xy))
             self.magnets[-1].set_imperfection(max=0.01)
         self.n=XY.shape[0]
-    def field(self,XY): #sum of all
+    def field(self,XY): #sum of all fields
         UV=np.zeros(XY.shape)
         for magnet in self.magnets:
             UV+=magnet.field(XY)
         return UV
-    def field_jacobian(self,xy):
+    def field_jacobian(self,xy): #Jacobian of field at xy w.r.t. magnet angles , would be good to replace with numpy implementation
         delta=1e-6
         jacobian=np.zeros((2,len(self.magnets)))
         for i in range(2):
@@ -101,7 +101,7 @@ class Array: #class for full magnet array
         return jacobian
 
 
-    def vector_plot(self,n=90,a=1.1):
+    def vector_plot(self,n=90,a=1.1): #plot overall field lines
         x = np.linspace(-a, a, n)
         y = np.linspace(-a, a, n)
         xx,yy=np.meshgrid(x, y)
@@ -113,7 +113,7 @@ class Array: #class for full magnet array
         q = plt.quiver(XY[:,0], XY[:,1],UV[:,0] ,UV[:,1] ,scale=None, color='r')
 
         plt.show()
-    def probe(self,xy=np.array([0,0])): #plot field at xy
+    def probe(self,xy=np.array([0,0])): #plot field values at xy as angles are changing, needs rewriting
 
         angles1 = np.linspace(0, 3.14/2, 200)+self.magnets[0].angle
         angles2 = np.linspace(0, 3.14/2, 200)+self.magnets[1].angle
@@ -141,11 +141,11 @@ class Array: #class for full magnet array
         plt.plot(value)
         plt.plot(value2)
         plt.show()
-    def orient(self,xy):
+    def orient(self,xy): #point all magnets to xy
         for magnet in self.magnets:
             magnet.look_at(xy)
 
-def controller(magnet_array,target_trajectory,time_step,xy):
+def controller(magnet_array,target_trajectory,time_step,xy): #heuristic controller
     accelerations=np.array([0,0,0,0],dtype=np.double)
     n=target_trajectory.shape[0]
     velocities=np.array([0,0,0,0],dtype=np.double)
