@@ -1,9 +1,14 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import numpy as np
 from numpy import random
 import math
+import matplotlib
 import matplotlib.pyplot as plt
 import copy
+import tensorflow as tf
 
+matplotlib.use('TkAgg')
 
 def dot(x,y): #contraction of arrays
     if max(x.ndim,y.ndim)>1:
@@ -81,16 +86,17 @@ class Trajectory: #trajectory class, not used
         self.time=np.linspace(0, time_max, self.n)
         self.value=value
         self.fn=coeff
+    def randomize(self,max):
+        self.fourier_series=self.n*max*(np.random.random((2,self.fn))-0.5)
+        print(self.fourier_series)
+
     def FT(self):
         self.im_FT=np.fft.fft(self.value*1j+self.time)[0:self.fn]
         self.fourier_series=np.zeros((2,self.fn))
         self.fourier_series[0]=np.imag(self.im_FT)
         self.fourier_series[1]=-np.real(self.im_FT)
+        print(self.fourier_series)
     def plot_FT(self):
-        angles=np.arange(0,self.fn)*self.time[:,None]
-        print(angles.shape)
-        values=np.sum(np.sin(angles)*self.fourier_series[0],axis=1)+np.sum(np.cos(angles)*self.fourier_series[1],axis=1)
-        print(values.shape)
         plt.plot(np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n))
         plt.show()
 
@@ -183,7 +189,7 @@ def controller(magnet_array,target_trajectory,time_step,xy): #heuristic controll
 
     print(magnet_array.field(xy))
     for i in range(0,n):
-        accelerations=-4*dot((magnet_array.field(xy)[0]-target_trajectory[i]),magnet_array.field_jacobian(xy).transpose())
+        accelerations=-dot((magnet_array.field(xy)[0]-target_trajectory[i]),magnet_array.field_jacobian(xy).transpose())
         velocities+=accelerations*time_step-velocities*5*time_step
         angles+=velocities*time_step
         for j in range(len(magnet_array.magnets)):
@@ -219,11 +225,17 @@ graph.probe(np.array([0,0]))
 n=10000
 time=10
 
-trajectoryx=Trajectory(value=np.concatenate((np.linspace(0,100,500),100-np.linspace(0,100,500)),axis=0),time_max=10,coeff=50)
+trajectoryx=Trajectory(value=np.concatenate((np.linspace(0,100,500),100-np.linspace(0,100,500)),axis=0),time_max=10,coeff=20)
+#trajectoryx.randomize(max=25)
 trajectoryx.FT()
+
 trajectoryx.plot_FT()
-Bx=100*np.sin(t)
-By=2*t**2
+
+#trajectoryx.plot_FT()
+t=np.linspace(0,10,1000)
+timestep=0.01
+Bx=10*np.sin(t)
+By=t**2
 trajectory=np.stack((Bx,By),axis=1)
 controller(magnets,trajectory,time_step=timestep,xy=np.array([0,0])[None,:])
 
