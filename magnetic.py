@@ -18,7 +18,7 @@ class Magnet:
         self.imperfect=False
         self.angular_velocity=0
         self.max_acceleration=40*2*3.14
-    def set_imperfection(self,n=40,max=0.01): #small peturbations to dipole field
+    def set_imperfection(self,n=40,max=0.04): #small peturbations to dipole field
         self.imperfection_coefficients=(np.random.rand(4,n)-0.5)*max*self.strength
         self.imperfect=True
         self.n=n
@@ -61,15 +61,41 @@ class Magnet:
         r=(xy-self.position)
         new_angle=np.arctan2(r[0],r[1])
         self.angle=new_angle
+    def probe(self,xy):
+        self.look_at(xy)
+        value=[]
+        value2=[]
+        angles = np.linspace(0, 6.28, 200)+self.angle
+        for angle in angles:
+            self.angle = angle
+            value.append(self.field(xy.reshape((1, 2)))[0, 0])
+            value2.append(self.field(xy.reshape(1, 2))[0, 1])
+        plt.plot(value)
+        plt.plot(value2)
+        plt.show()
 
 class Trajectory: #trajectory class, not used
-    def __init__(self,time,analytic=True, func= None,sampling=100):
-        self.time=time
-        self.analytic=analytic
-        if analytic:
-            self.position=func
-        else:
-            self.sampling=sampling
+    def __init__(self,value,time_max,coeff):
+        self.time_max=time_max
+        self.n=value.size
+        self.time=np.linspace(0, time_max, self.n)
+        self.value=value
+        self.fn=coeff
+    def FT(self):
+        self.im_FT=np.fft.fft(self.value*1j+self.time)[0:self.fn]
+        self.fourier_series=np.zeros((2,self.fn))
+        self.fourier_series[0]=np.imag(self.im_FT)
+        self.fourier_series[1]=-np.real(self.im_FT)
+    def plot_FT(self):
+        angles=np.arange(0,self.fn)*self.time[:,None]
+        print(angles.shape)
+        values=np.sum(np.sin(angles)*self.fourier_series[0],axis=1)+np.sum(np.cos(angles)*self.fourier_series[1],axis=1)
+        print(values.shape)
+        plt.plot(np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n))
+        plt.show()
+
+
+
 
 
 
@@ -157,8 +183,8 @@ def controller(magnet_array,target_trajectory,time_step,xy): #heuristic controll
 
     print(magnet_array.field(xy))
     for i in range(0,n):
-        accelerations=-2*dot((magnet_array.field(xy)[0]-target_trajectory[i]),magnet_array.field_jacobian(xy).transpose())
-        velocities+=accelerations*time_step-velocities*1*time_step
+        accelerations=-4*dot((magnet_array.field(xy)[0]-target_trajectory[i]),magnet_array.field_jacobian(xy).transpose())
+        velocities+=accelerations*time_step-velocities*5*time_step
         angles+=velocities*time_step
         for j in range(len(magnet_array.magnets)):
             magnet_array.magnets[j].angle=angles[j]
@@ -187,10 +213,19 @@ def controller(magnet_array,target_trajectory,time_step,xy): #heuristic controll
 magnets=Array()
 magnets.orient(np.array([0,0]))
 print(magnets.field_jacobian(np.array([0,0])[None,:]))
-Bx=np.linspace(0,100,1000)
-By=np.zeros_like(Bx)
+graph=Magnet(np.array([-1,0]))
+graph.set_imperfection()
+graph.probe(np.array([0,0]))
+n=10000
+time=10
+
+trajectoryx=Trajectory(value=np.concatenate((np.linspace(0,100,500),100-np.linspace(0,100,500)),axis=0),time_max=10,coeff=50)
+trajectoryx.FT()
+trajectoryx.plot_FT()
+Bx=100*np.sin(t)
+By=2*t**2
 trajectory=np.stack((Bx,By),axis=1)
-controller(magnets,trajectory,time_step=0.001,xy=np.array([0,0])[None,:])
+controller(magnets,trajectory,time_step=timestep,xy=np.array([0,0])[None,:])
 
 magnets.vector_plot()
 magnets.probe()
