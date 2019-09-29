@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from datetime import time
+
 import numpy as np
 from numpy import random
 import math
@@ -7,6 +9,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import copy
 import tensorflow as tf
+from tensorflow import keras
+
 
 matplotlib.use('TkAgg')
 
@@ -80,12 +84,10 @@ class Magnet:
         plt.show()
 
 class Trajectory: #trajectory class, not used
-    def __init__(self,value,time_max,coeff):
+    def __init__(self,time_max,coeff):
         self.time_max=time_max
-        self.n=value.size
-        self.time=np.linspace(0, time_max, self.n)
-        self.value=value
         self.fn=coeff
+
     def randomize(self,max):
         self.fourier_series=self.n*max*(np.random.random((2,self.fn))-0.5)
         print(self.fourier_series)
@@ -96,9 +98,22 @@ class Trajectory: #trajectory class, not used
         self.fourier_series[0]=np.imag(self.im_FT)
         self.fourier_series[1]=-np.real(self.im_FT)
         print(self.fourier_series)
+
+    def set_coords(self, value):
+        self.value = value
+        self.time=np.linspace(0, self.time_max, self.n)
+        self.n=value.size
+        self.FT()
     def plot_FT(self):
         plt.plot(np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n))
         plt.show()
+    def y(self):
+        return np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n)
+    def normalised_FT(self):
+        return self.fourier_series/self.max
+
+def trajectory_fit(trajectory1, trajectory2):
+    return np.sum((trajectory1.y-trajectory2.y)**2)/trajectory1.n
 
 
 
@@ -145,34 +160,33 @@ class Array: #class for full magnet array
         q = plt.quiver(XY[:,0], XY[:,1],UV[:,0] ,UV[:,1] ,scale=None, color='r')
 
         plt.show()
-    def probe(self,xy=np.array([0,0])): #plot field values at xy as angles are changing, needs rewriting
+    def trajectory_field(self, fourier_coeff, xy=np.array([0, 0]), time=1,n=1000):
 
-        angles1 = np.linspace(0, 3.14/2, 200)+self.magnets[0].angle
-        angles2 = np.linspace(0, 3.14/2, 200)+self.magnets[1].angle
+        self.Trajectories=[]
+        for i in range(fourier_coeff.shape[0]):
+            self.Trajectories.append(Trajectory(time_max=time,coeff=20))
+            self.Trajectories[-1].fourier_series=fourier_coeff[i]
+            self.Trajectories[-1].n=n
 
-        angles3 = np.linspace(0, -3.14/2, 200)+self.magnets[2].angle
-        angles4 = np.linspace(0, -3.14/2, 200)+self.magnets[3].angle
-
-
+        angles=np.zeros((4,n))
+        for i in range(angles.shape[0]):
+            angles[i]=self.Trajectories[i].y()
+        print(angles.shape)
+        return self.probe(angles)
+    def probe(self,angles,xy=np.array([0,0])): #plot field values at xy as angles are changing, needs rewriting
         value = []
         value2 = []
-        magnet=self.magnets[0]
-        for i in range(angles1.shape[0]):
-
-            angle1=angles1[i]
-            angle2=angles2[i]
-            angle3=angles3[i]
-            angle4=angles4[i]
-            self.magnets[0].angle = -angle1
-            self.magnets[1].angle = -angle2
-            self.magnets[2].angle = -angle3
-            self.magnets[3].angle = -angle4
+        for i in range(angles.shape[1]):
+            for j in range(angles.shape[0]):
+                self.magnets[j].angle = -angles[j,i]
 
             value.append(self.field(np.array([0,0]).reshape((1,2)))[0,0])
             value2.append(self.field(np.array([0,0]).reshape(1,2))[0,1])
         plt.plot(value)
         plt.plot(value2)
         plt.show()
+
+        return np.array(value),np.array(value2)
     def orient(self,xy): #point all magnets to xy
         for magnet in self.magnets:
             magnet.look_at(xy)
@@ -209,15 +223,19 @@ def controller(magnet_array,target_trajectory,time_step,xy): #heuristic controll
 
 
 
+model = keras.Sequential([
+    keras.layers.Flatten(input_shape=(20, 2)),
+    keras.layers.Dense(160, activation='relu'),
+    keras.layers.Dense(160, activation='relu'),
+    keras.layers.Reshape((4,2,20))
+])
+optimizer = tf.keras.optimizers.RMSprop(0.001)
 
-
-
-
-
-
-
+coeffs=5000*(np.random.random((4,2,4))-0.5)
+np.concatenate((coeffs,np.zeros((4,2,16))),axis=2)
 magnets=Array()
 magnets.orient(np.array([0,0]))
+magnets.trajectory_field(coeffs)
 print(magnets.field_jacobian(np.array([0,0])[None,:]))
 graph=Magnet(np.array([-1,0]))
 graph.set_imperfection()
@@ -226,8 +244,8 @@ n=10000
 time=10
 
 trajectoryx=Trajectory(value=np.concatenate((np.linspace(0,100,500),100-np.linspace(0,100,500)),axis=0),time_max=10,coeff=20)
-#trajectoryx.randomize(max=25)
-trajectoryx.FT()
+trajectoryx.randomize(max=25)
+#trajectoryx.FT()
 
 trajectoryx.plot_FT()
 
