@@ -84,10 +84,12 @@ class Magnet:
         plt.show()
 
 class Trajectory: #trajectory class, not used
-    def __init__(self,time_max,coeff):
+    def __init__(self,Fourier=None,time_max=1,n=1000):
+        if Fourier is not None:
+            self.fourier_series=Fourier*n
+            self.fn=Fourier.shape[1]
+            self.n=n
         self.time_max=time_max
-        self.fn=coeff
-
     def randomize(self,max):
         self.fourier_series=self.n*max*(np.random.random((2,self.fn))-0.5)
         print(self.fourier_series)
@@ -95,8 +97,8 @@ class Trajectory: #trajectory class, not used
     def FT(self):
         self.im_FT=np.fft.fft(self.value*1j+self.time)[0:self.fn]
         self.fourier_series=np.zeros((2,self.fn))
-        self.fourier_series[0]=np.imag(self.im_FT)
-        self.fourier_series[1]=-np.real(self.im_FT)
+        self.fourier_series[0]=np.imag(self.im_FT,dtype=np.float)
+        self.fourier_series[1]=-np.real(self.im_FT,dtype=np.float)
         print(self.fourier_series)
 
     def set_coords(self, value):
@@ -108,12 +110,14 @@ class Trajectory: #trajectory class, not used
         plt.plot(np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n))
         plt.show()
     def y(self):
-        return np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n)
+        complex_f=self.fourier_series.eval()
+        ft=np.real(np.fft.irfft(complex_f[0]+1j*complex_f[1],n=self.n))
+        ft=ft.astype(dtype=np.float)
+        return ft
     def normalised_FT(self):
         return self.fourier_series/self.max
 
-def trajectory_fit(trajectory1, trajectory2):
-    return np.sum((trajectory1.y-trajectory2.y)**2)/trajectory1.n
+
 
 
 
@@ -164,8 +168,7 @@ class Array: #class for full magnet array
 
         self.Trajectories=[]
         for i in range(fourier_coeff.shape[0]):
-            self.Trajectories.append(Trajectory(time_max=time,coeff=20))
-            self.Trajectories[-1].fourier_series=fourier_coeff[i]
+            self.Trajectories.append(Trajectory(fourier_coeff[i],time_max=time))
             self.Trajectories[-1].n=n
 
         angles=np.zeros((4,n))
@@ -220,42 +223,37 @@ def controller(magnet_array,target_trajectory,time_step,xy): #heuristic controll
     plt.plot(target_trajectory[:,1])
     plt.show()
 
-
+def loss(magnet_array):
+    def value(y_true, y_pred):
+        with tf.Session() as sess:
+            y_pred= y_pred.eval()
+            y_true=y_true.eval()
+        targetu=Trajectory(y_true[0]).y()
+        targetv=Trajectory(y_true[1]).y()
+        actualu,actualv= magnet_array.trajectory_field(y_pred)
+        plt.plot(actualu)
+        plt.plot(targetu)
+        plt.show()
+        return np.sum((targetu-actualu)**2+ (targetv-actualv)**2)
+    return value
 
 
 model = keras.Sequential([
-    keras.layers.Flatten(input_shape=(20, 2)),
+    keras.layers.Flatten(input_shape=(2, 2 ,20)),
     keras.layers.Dense(160, activation='relu'),
     keras.layers.Dense(160, activation='relu'),
     keras.layers.Reshape((4,2,20))
 ])
-optimizer = tf.keras.optimizers.RMSprop(0.001)
 
-coeffs=5000*(np.random.random((4,2,4))-0.5)
-np.concatenate((coeffs,np.zeros((4,2,16))),axis=2)
 magnets=Array()
 magnets.orient(np.array([0,0]))
-magnets.trajectory_field(coeffs)
-print(magnets.field_jacobian(np.array([0,0])[None,:]))
-graph=Magnet(np.array([-1,0]))
-graph.set_imperfection()
-graph.probe(np.array([0,0]))
-n=10000
-time=10
+dataset=20*(np.random.random((100,2,2,20))-0.5)
+optimizer = tf.keras.optimizers.RMSprop(0.001)
+dupa=loss(magnets)
+model.compile(loss=dupa,
+              optimizer=optimizer,
+              metrics=['mae', 'mse'])
 
-trajectoryx=Trajectory(value=np.concatenate((np.linspace(0,100,500),100-np.linspace(0,100,500)),axis=0),time_max=10,coeff=20)
-trajectoryx.randomize(max=25)
-#trajectoryx.FT()
+model.summary()
 
-trajectoryx.plot_FT()
-
-#trajectoryx.plot_FT()
-t=np.linspace(0,10,1000)
-timestep=0.01
-Bx=10*np.sin(t)
-By=t**2
-trajectory=np.stack((Bx,By),axis=1)
-controller(magnets,trajectory,time_step=timestep,xy=np.array([0,0])[None,:])
-
-magnets.vector_plot()
-magnets.probe()
+trajectory=Trajectory(dataset[0,0]).plot_FT()
