@@ -195,7 +195,7 @@ class Array: #class for full magnet array
             magnet.look_at(xy)
 
     def get_coeff(self):
-        coeff = np.zeros((4, 2, 20))
+        coeff = np.zeros((4, 2, 20),dtype=np.complex)
         for i in range(4):
             coeff[i,0]=np.fft.fft(self.magnets[i].probe()[0])[0:20]
             coeff[i,1]=np.fft.fft(self.magnets[i].probe()[1])[0:20]
@@ -246,46 +246,44 @@ def loss(magnet_array):
 
 samples=1000
 
-def to_complex(tensor):
-    return tf.complex(tensor[:,:,0,:],tensor[:,:,1,:])
+def float_fft(tensor):
+    return tf.signal.fft(tf.complex(tensor,0))
 def field(inputcoeff):
     const = tf.constant(inputcoeff, shape=(4,2,20),dtype="complex64")
     print("success")
     def output(tensor):
-        range=tf.constant(np.arange(20,dtype=np.float32))
+        range=tf.constant(np.arange(20),dtype="complex64")
         A=tf.einsum("j,akim->ajkim",range,tensor)
-        B = tf.math.exp(tf.complex(np.array([0]).astype(np.float32), A))
-        G = tf.math.real(tf.einsum("kij,ajkim->akim", const, B))
+        B = tf.math.exp(tf.complex(np.array([0]).astype(np.complex64), tf.real(A)),dtype="complex64")
+        G = tf.einsum("kij,ajkim->akim", const, B)
         return G
     return output
 def tensor_sum(tensor):
-    return tf.einsum("ajkm->akm",tensor)
+    return tf.einsum("ajkm->akm",tensor,dtype="complex64")
+
 magnets=Array()
 magnets.orient(np.array([0,0]))
 coeff=magnets.get_coeff()
+plt.plot(np.fft.irfft(coeff[0,0]))
 print(coeff)
 tensor_field=field(coeff)
 model = keras.Sequential([
-    keras.layers.Flatten(input_shape=(2,2,20)),
+    keras.layers.Flatten(input_shape=(2,20)),
     keras.layers.Dense(320, activation='relu'),
     keras.layers.Dense(320, activation='relu'),
-    keras.layers.Reshape((4,2,2,20)),
-    keras.layers.Lambda(to_complex,output_shape=(4,2,20), mask=None, arguments=None),
-    keras.layers.Lambda(tf.signal.irfft,output_shape=(4,2,20), mask=None, arguments=None),
-    keras.layers.Lambda(tensor_field,output_shape=(4,2,20), mask=None, arguments=None),
+    keras.layers.Reshape((4,2,20)),
+    keras.layers.Lambda(tf.signal.ifft,output_shape=(4,2,20), mask=None, arguments=None),
     keras.layers.Lambda(tensor_field,output_shape=(4,2,20), mask=None, arguments=None),
     keras.layers.Lambda(tensor_sum, output_shape=(2, 20), mask=None, arguments=None),
-    keras.layers.Lambda(tf.signal.rfft, output_shape=(2, 20), mask=None, arguments=None),
+    keras.layers.Lambda(tf.signal.fft, output_shape=(2, 20), mask=None, arguments=None),
 ])
 
 
-dataset=20*(np.random.random((100,2,2,20))-0.5)
+dataset=20*(np.random.random((100,2,20))-0.5)
 optimizer = tf.keras.optimizers.RMSprop(0.001)
-dupa=loss(magnets)
 model.compile(loss='mean_squared_error',
               optimizer=optimizer,
               metrics=['mae', 'mse'])
 
 model.summary()
-
-trajectory=Trajectory(dataset[0,0]).plot_FT()
+model.fit(dataset, dataset, epochs=10)
