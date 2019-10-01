@@ -71,7 +71,7 @@ class Magnet:
         r=(xy-self.position)
         new_angle=np.arctan2(r[0],r[1])
         self.angle=new_angle
-    def probe(self,xy):
+    def probe(self,xy=np.zeros((2))):
         self.look_at(xy)
         value=[]
         value2=[]
@@ -80,14 +80,12 @@ class Magnet:
             self.angle = angle
             value.append(self.field(xy.reshape((1, 2)))[0, 0])
             value2.append(self.field(xy.reshape(1, 2))[0, 1])
-        plt.plot(value)
-        plt.plot(value2)
-        plt.show()
+        return value,value2
 
 class Trajectory: #trajectory class, not used
     def __init__(self,Fourier=None,time_max=1,n=1000):
         if Fourier is not None:
-            self.fourier_series=Fourier*n
+            self.im_FT=Fourier*n
             self.fn=Fourier.shape[1]
             self.n=n
         self.time_max=time_max
@@ -95,7 +93,9 @@ class Trajectory: #trajectory class, not used
         self.fourier_series=self.n*max*(np.random.random((2,self.fn))-0.5)
         print(self.fourier_series)
 
-    def FT(self):
+    def FT(self,fn=None):
+        if fn is not None:
+            self.fn=fn
         self.im_FT=np.fft.fft(self.value*1j+self.time)[0:self.fn]
         self.fourier_series=np.zeros((2,self.fn))
         self.fourier_series[0]=np.imag(self.im_FT,dtype=np.float)
@@ -111,7 +111,6 @@ class Trajectory: #trajectory class, not used
         plt.plot(np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n))
         plt.show()
     def y(self):
-        complex_f=self.fourier_series.eval()
         ft=np.real(np.fft.irfft(complex_f[0]+1j*complex_f[1],n=self.n))
         ft=ft.astype(dtype=np.float)
         return ft
@@ -195,6 +194,13 @@ class Array: #class for full magnet array
         for magnet in self.magnets:
             magnet.look_at(xy)
 
+    def get_coeff(self):
+        coeff = np.zeros((4, 2, 20))
+        for i in range(4):
+            coeff[i,0]=np.fft.fft(self.magnets[i].probe()[0])[0:20]
+            coeff[i,1]=np.fft.fft(self.magnets[i].probe()[1])[0:20]
+        return coeff
+
 def controller(magnet_array,target_trajectory,time_step,xy): #heuristic controller
     accelerations=np.array([0,0,0,0],dtype=np.double)
     n=target_trajectory.shape[0]
@@ -241,27 +247,38 @@ def loss(magnet_array):
 samples=1000
 
 def to_complex(tensor):
-    return tf.complex(tensor[:,0,:],tensor[:,1,:])
+    return tf.complex(tensor[:,:,0,:],tensor[:,:,1,:])
 def field(inputcoeff):
-    const = tf.constant(inputcoeff, shape=(4,20))
+    const = tf.constant(inputcoeff, shape=(4,2,20),dtype="complex64")
+    print("success")
     def output(tensor):
-        return tensor*
-
-
-
-model = keras.Sequential([
-    keras.layers.Flatten(input_shape=(2,2,20)),
-    keras.layers.Dense(160, activation='relu'),
-    keras.layers.Dense(160, activation='relu'),
-    keras.layers.Reshape((4,2,20)),
-    keras.layers.Lambda(to_complex,output_shape=(4,20), mask=None, arguments=None),
-    keras.layers.Lambda(tf.signal.irfft,output_shape=(4,20), mask=None, arguments=None),
-
-
-])
-
+        range=tf.constant(np.arange(20,dtype=np.float32))
+        A=tf.einsum("j,akim->ajkim",range,tensor)
+        B = tf.math.exp(tf.complex(np.array([0]).astype(np.float32), A))
+        G = tf.math.real(tf.einsum("kij,ajkim->akim", const, B))
+        return G
+    return output
+def tensor_sum(tensor):
+    return tf.einsum("ajkm->akm",tensor)
 magnets=Array()
 magnets.orient(np.array([0,0]))
+coeff=magnets.get_coeff()
+print(coeff)
+tensor_field=field(coeff)
+model = keras.Sequential([
+    keras.layers.Flatten(input_shape=(2,2,20)),
+    keras.layers.Dense(320, activation='relu'),
+    keras.layers.Dense(320, activation='relu'),
+    keras.layers.Reshape((4,2,2,20)),
+    keras.layers.Lambda(to_complex,output_shape=(4,2,20), mask=None, arguments=None),
+    keras.layers.Lambda(tf.signal.irfft,output_shape=(4,2,20), mask=None, arguments=None),
+    keras.layers.Lambda(tensor_field,output_shape=(4,2,20), mask=None, arguments=None),
+    keras.layers.Lambda(tensor_field,output_shape=(4,2,20), mask=None, arguments=None),
+    keras.layers.Lambda(tensor_sum, output_shape=(2, 20), mask=None, arguments=None),
+    keras.layers.Lambda(tf.signal.rfft, output_shape=(2, 20), mask=None, arguments=None),
+])
+
+
 dataset=20*(np.random.random((100,2,2,20))-0.5)
 optimizer = tf.keras.optimizers.RMSprop(0.001)
 dupa=loss(magnets)
