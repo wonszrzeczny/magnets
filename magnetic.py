@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import copy
 import tensorflow as tf
 from tensorflow import keras
+from tensorflow import signal
 
 
 matplotlib.use('TkAgg')
@@ -237,12 +238,26 @@ def loss(magnet_array):
         return np.sum((targetu-actualu)**2+ (targetv-actualv)**2)
     return value
 
+samples=1000
+
+def to_complex(tensor):
+    return tf.complex(tensor[:,0,:],tensor[:,1,:])
+def field(inputcoeff):
+    const = tf.constant(inputcoeff, shape=(4,20))
+    def output(tensor):
+        return tensor*
+
+
 
 model = keras.Sequential([
-    keras.layers.Flatten(input_shape=(2, 2 ,20)),
+    keras.layers.Flatten(input_shape=(2,2,20)),
     keras.layers.Dense(160, activation='relu'),
     keras.layers.Dense(160, activation='relu'),
-    keras.layers.Reshape((4,2,20))
+    keras.layers.Reshape((4,2,20)),
+    keras.layers.Lambda(to_complex,output_shape=(4,20), mask=None, arguments=None),
+    keras.layers.Lambda(tf.signal.irfft,output_shape=(4,20), mask=None, arguments=None),
+
+
 ])
 
 magnets=Array()
@@ -250,7 +265,7 @@ magnets.orient(np.array([0,0]))
 dataset=20*(np.random.random((100,2,2,20))-0.5)
 optimizer = tf.keras.optimizers.RMSprop(0.001)
 dupa=loss(magnets)
-model.compile(loss=dupa,
+model.compile(loss='mean_squared_error',
               optimizer=optimizer,
               metrics=['mae', 'mse'])
 
