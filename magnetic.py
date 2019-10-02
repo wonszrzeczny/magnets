@@ -6,6 +6,7 @@ import numpy as np
 from numpy import random
 import math
 import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import copy
 import tensorflow as tf
@@ -13,7 +14,7 @@ from tensorflow import keras
 from tensorflow import signal
 
 
-matplotlib.use('TkAgg')
+
 
 def dot(x,y): #contraction of arrays
     if max(x.ndim,y.ndim)>1:
@@ -93,22 +94,22 @@ class Trajectory: #trajectory class, not used
         self.fourier_series=self.n*max*(np.random.random((2,self.fn))-0.5)
         print(self.fourier_series)
 
-    def FT(self,fn=None):
+    def FT(self,fn=20):
         if fn is not None:
             self.fn=fn
-        self.im_FT=np.fft.fft(self.value*1j+self.time)[0:self.fn]
+        self.im_FT=np.fft.rfft(self.value)[0:self.fn]
         self.fourier_series=np.zeros((2,self.fn))
-        self.fourier_series[0]=np.imag(self.im_FT,dtype=np.float)
-        self.fourier_series[1]=-np.real(self.im_FT,dtype=np.float)
+        self.fourier_series[0]=np.real(self.im_FT)
+        self.fourier_series[1]=np.imag(self.im_FT)
         print(self.fourier_series)
 
     def set_coords(self, value):
-        self.value = value
-        self.time=np.linspace(0, self.time_max, self.n)
         self.n=value.size
-        self.FT()
+        self.value = value
+        self.n=value.size
+        self.time=np.linspace(0, self.time_max, self.n)
     def plot_FT(self):
-        plt.plot(np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n))
+        plt.plot(self.time,np.fft.irfft(self.fourier_series[0]+1j*self.fourier_series[1],n=self.n))
         plt.show()
     def y(self):
         ft=np.real(np.fft.irfft(complex_f[0]+1j*complex_f[1],n=self.n))
@@ -116,16 +117,6 @@ class Trajectory: #trajectory class, not used
         return ft
     def normalised_FT(self):
         return self.fourier_series/self.max
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -197,8 +188,8 @@ class Array: #class for full magnet array
     def get_coeff(self):
         coeff = np.zeros((4, 2, 20),dtype=np.complex)
         for i in range(4):
-            coeff[i,0]=np.fft.fft(self.magnets[i].probe()[0])[0:20]
-            coeff[i,1]=np.fft.fft(self.magnets[i].probe()[1])[0:20]
+            coeff[i,0]=np.fft.rfft(self.magnets[i].probe()[0])[0:20]
+            coeff[i,1]=np.fft.rfft(self.magnets[i].probe()[1])[0:20]
         return coeff
 
 def controller(magnet_array,target_trajectory,time_step,xy): #heuristic controller
@@ -243,47 +234,92 @@ def loss(magnet_array):
         plt.show()
         return np.sum((targetu-actualu)**2+ (targetv-actualv)**2)
     return value
+def fourier_transform(Bx,By):
+    output=np.zeros((2,2,20))
+    FBx=np.fft.rfft(Bx)[0:20]
+    FBy=np.fft.fft(By)[0:20]
+    output[0,0]=np.real(FBx)
+    output[0,1]=np.imag(FBx)
+    return output
+def rfourier_transform(tensor,n=200):
+    imx= tensor[0, 0] + 1j * tensor[0, 1]
+    fx=np.fft.irfft(imx,n=n)
+    imy= tensor[1, 0] + 1j * tensor[1, 1]
+    fy=np.fft.irfft(imy,n=n)
+    out=np.array([fx,fy])
+    return out
 
 samples=1000
 
-def float_fft(tensor):
-    return tf.signal.fft(tf.complex(tensor,0))
+def reverse_fourier(tensor):
+    reverse=tf.signal.irfft(tf.complex(tensor[:,:,0,:],tensor[:,:,1,:]))
+    return reverse
 def field(inputcoeff):
     const = tf.constant(inputcoeff, shape=(4,2,20),dtype="complex64")
     print("success")
     def output(tensor):
-        range=tf.constant(np.arange(20),dtype="complex64")
-        A=tf.einsum("j,akim->ajkim",range,tensor)
-        B = tf.math.exp(tf.complex(np.array([0]).astype(np.complex64), tf.real(A)),dtype="complex64")
-        G = tf.einsum("kij,ajkim->akim", const, B)
-        return G
+        lin=2*3.141*tf.constant(np.linspace(0,1,20),dtype="float")
+        exponent=tf.einsum("j,akim->akimj",lin,tensor)
+        B = tf.math.exp(tf.complex(np.array([0],dtype=np.float32), exponent))
+        B_conj = tf.math.exp(tf.complex(np.array([0],dtype=np.float32), -exponent))
+
+        G = tf.einsum("kij,akimj->akim", const, B+B_conj)/20
+        return tf.math.real(G)
     return output
 def tensor_sum(tensor):
-    return tf.einsum("ajkm->akm",tensor,dtype="complex64")
+    A=tf.einsum("akjm->ajm",tensor)
+    return A
+def signal_fft(tensor):
+    A=tf.signal.rfft(tensor)
+    return tf.stack([tf.math.real(A),tf.math.imag(A)],axis=1)
 
 magnets=Array()
 magnets.orient(np.array([0,0]))
 coeff=magnets.get_coeff()
-plt.plot(np.fft.irfft(coeff[0,0]))
-print(coeff)
+plt.plot(np.fft.irfft(coeff[0,0],n=100))
+plt.show()
+
 tensor_field=field(coeff)
 model = keras.Sequential([
-    keras.layers.Flatten(input_shape=(2,20)),
+    keras.layers.Flatten(input_shape=(2,2,20)),
     keras.layers.Dense(320, activation='relu'),
     keras.layers.Dense(320, activation='relu'),
-    keras.layers.Reshape((4,2,20)),
-    keras.layers.Lambda(tf.signal.ifft,output_shape=(4,2,20), mask=None, arguments=None),
-    keras.layers.Lambda(tensor_field,output_shape=(4,2,20), mask=None, arguments=None),
-    keras.layers.Lambda(tensor_sum, output_shape=(2, 20), mask=None, arguments=None),
-    keras.layers.Lambda(tf.signal.fft, output_shape=(2, 20), mask=None, arguments=None),
+    keras.layers.Reshape((4,2,2,20)),
+    keras.layers.Lambda(reverse_fourier,output_shape=(4,2,38), mask=None, arguments=None),
+    keras.layers.Lambda(tensor_field,output_shape=(4,2,38), mask=None, arguments=None),
+    keras.layers.Lambda(tensor_sum, output_shape=(2, 38), mask=None, arguments=None),
+    keras.layers.Lambda(signal_fft, output_shape=(2,2, 20), mask=None, arguments=None),
 ])
 
+Bx=np.concatenate((np.linspace(0,50,100),50-np.linspace(0,50,100)))
+By=np.zeros_like(Bx)
+t=np.linspace(0,1,200)
+dataset=200*(np.random.normal(loc=0,size=(200,2,2,20),scale=2))
+#dataset=fourier_transform(Bx,By)[None,:]
 
-dataset=20*(np.random.random((100,2,20))-0.5)
-optimizer = tf.keras.optimizers.RMSprop(0.001)
+optimizer = tf.keras.optimizers.RMSprop(0.00001)
+checkpoint_path="C:/Users/Maks/Desktop/checkpoints/cp.ckpt"
+
 model.compile(loss='mean_squared_error',
               optimizer=optimizer,
               metrics=['mae', 'mse'])
-
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+                                                 save_weights_only=True,
+                                                 verbose=1)
+model.fit(dataset, dataset, epochs=400,callbacks=[cp_callback])
 model.summary()
-model.fit(dataset, dataset, epochs=10)
+
+for i in range(100):
+    predictions = model.predict(dataset[None,i])
+    plt.plot(rfourier_transform(dataset[i])[0])
+    plt.plot(rfourier_transform(predictions[0])[0])
+    plt.show()
+    plt.plot(rfourier_transform(dataset[i])[1])
+    plt.plot(rfourier_transform(predictions[0])[1])
+    plt.show()
+
+#place=np.stack((np.real(dataset[0,0]),np.imag(dataset[0,0])),axis=1)
+#print(place.shape,"shape")
+#plt.plot(rfourier_transform(place)[0])
+
+
